@@ -1,0 +1,29 @@
+# CLUPmax
+
+import math, random, numpy
+
+random.seed(0)
+# Nombre de learner
+M = 4
+F = numpy.random.poisson(1,M)+1
+Fmax = max(F)
+z = 0.5  # paramètre sans importance
+
+def D_1(t):
+    return math.log(t)*t**z
+
+def D_2(t):
+    return Fmax*math.log(t)*t**z
+
+def CLUPmax(x_it , m_T, N_ifpt, N_itrjpt, t ):
+    train = 0
+    # Partition en hypercube régulier // recherche de l'index de l'ensemble contenant le contexte
+    # Les p.it sont dans (0,m.T-1)
+    p = sum((int(x_it[i]*m_T))*m_T**i for i in range (0,m_T))
+    # N_ifpt est le vecteur du nombre d'utilisations des bras f du learner i pour l'espace p
+    F_ue_ipt = [i for i in range (0,len(N_ifpt)) if N_ifpt[i] <= D_1(t) ]
+    if len(F_ue_ipt)>0:
+        a_i = random.choice(F_ue_ipt)
+    else:
+        M_ct_ipt = [i for i in range (0,len(N_itrjpt)) if N_itrjpt[i] <= D_2(t) ]
+
