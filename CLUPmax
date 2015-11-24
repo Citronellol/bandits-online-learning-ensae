@@ -3,11 +3,32 @@
 import math, random, numpy
 
 random.seed(0)
-# Nombre de learner
+# Nombre de learner, temps total, nombre d'hypercubes
 M = 4
+T = 100
+m_T = 4
+t=1
+
+# Nombre d'arms par learner
 F = numpy.random.poisson(1,M)+1
+# Borne maximale des arms
 Fmax = max(F)
-z = 0.5  # paramètre sans importance
+
+# Paramètres de fonctions
+z = 0.5
+
+# Paramètres pour le bandits i
+ordi_index = 2
+Fi = F[ordi_index]  # Nombre d'arms
+
+
+# Initialisation des différents compteurs
+N_ipt = numpy.zeros((T,m_T))      # Nombre de contextes arrivant à i à chaque t dans T et chaque espace dans m_T
+N_ifpt = numpy.zeros((T,m_T,Fi))  # Nombre de fois où un arm f dans Fi est sélectionné pour un contexte à temps t et
+                                  # espace p
+N_itr_jpt = numpy.zeros((T,m_T,M-1))  # Estimation par i du nombre de contextes arrivant vers j depuis tous les learners
+                                      # (except phases d'explorations et exploitations de i)
+N_i_jpt = numpy.zeros((T,m_T))    # Nombre de contextes venant de i vers j à t pour l'espace p
 
 def D_1(t):
     return math.log(t)*t**z
@@ -15,15 +36,18 @@ def D_1(t):
 def D_2(t):
     return Fmax*math.log(t)*t**z
 
-def CLUPmax(x_it , m_T, N_ifpt, N_itrjpt, t ):
+def CLUPmax(x_it , m_T, N_ifpt, N_itr_jpt):
     train = 0
     # Partition en hypercube régulier // recherche de l'index de l'ensemble contenant le contexte
     # Les p.it sont dans (0,m.T-1)
     p = sum((int(x_it[i]*m_T))*m_T**i for i in range (0,m_T))
     # N_ifpt est le vecteur du nombre d'utilisations des bras f du learner i pour l'espace p
-    F_ue_ipt = [i for i in range (0,len(N_ifpt)) if N_ifpt[i] <= D_1(t) ]
+    F_ue_ipt = [i for i in range (0,len(N_ifpt[t,p,])) if N_ifpt[t,p,i] <= D_1(t) ]
     if len(F_ue_ipt)>0:
         a_i = random.choice(F_ue_ipt)
     else:
-        M_ct_ipt = [i for i in range (0,len(N_itrjpt)) if N_itrjpt[i] <= D_2(t) ]
+        M_ct_ipt = [i for i in range (0,len(N_itr_jpt[t,p,])) if N_itr_jpt[t,p,i] <= D_2(t) ]
+        for _ in M_ct_ipt:
+            # Récupère les informations des autres // Partie qui sera plus facile à coder plus tard
+            N_itr_jpt = N_
 
