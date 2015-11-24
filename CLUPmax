@@ -6,11 +6,13 @@ random.seed(0)
 # Nombre de learner, temps total, nombre d'hypercubes
 M = 4
 T = 100
-m_T = 4
-t=1
+m_T = 2
+D = 2
+nb_m = m_T**D
+t = 1
 
 # Nombre d'arms par learner
-F = numpy.random.poisson(1,M)+1
+F = numpy.random.poisson(1, M)+1
 # Borne maximale des arms
 Fmax = max(F)
 
@@ -23,18 +25,39 @@ Fi = F[ordi_index]  # Nombre d'arms
 
 
 # Initialisation des différents compteurs
-N_ipt = numpy.zeros((T,m_T))      # Nombre de contextes arrivant à i à chaque t dans T et chaque espace dans m_T
-N_ifpt = numpy.zeros((T,m_T,Fi))  # Nombre de fois où un arm f dans Fi est sélectionné pour un contexte à temps t et
-                                  # espace p
-N_itr_jpt = numpy.zeros((T,m_T,M-1))  # Estimation par i du nombre de contextes arrivant vers j depuis tous les learners
-                                      # (except phases d'explorations et exploitations de i)
-N_i_jpt = numpy.zeros((T,m_T))    # Nombre de contextes venant de i vers j à t pour l'espace p
+N_ipt = numpy.zeros((T, nb_m))       # Nombre de contextes arrivant à i à chaque t dans T et chaque espace dans m_T
+N_ifpt = numpy.zeros((T, nb_m, Fi))  # Nombre de fois où un arm f dans Fi est sélectionné pour un contexte à temps t et
+                                     # espace p
+N_itr_jpt = numpy.zeros((T, nb_m, M-1))  # Estimation par i du nombre de contextes arrivant vers j depuis tous les learners
+                                         # (except phases d'explorations et exploitations de i)
+N_i_jpt = numpy.zeros((T, nb_m, M-1))    # Nombre de contextes venant de i vers j à t pour l'espace p
+
+
+# Initialisation des fonctions de récompenses // Note : à chaque temps t ajouter le reward
+Eps_i_jpt = numpy.zeros((nb_m, M-1))  # Rewards collected by i after selecting j for space p by time t during
+                                      # exploration and exploitation time
+count_i_jpt = numpy.zeros((nb_m,M-1))  # Count the number of actions (because possibility of having many in one time t
+Eps_i_fpt = numpy.zeros((nb_m, Fi))   # Idem mais reward collected by i after using one of his arm (by itself or after
+                                      # being called by another bandit.
+count_i_fpt = numpy.zeros((nb_m,Fi))
+
+
+
 
 def D_1(t):
     return math.log(t)*t**z
 
 def D_2(t):
     return Fmax*math.log(t)*t**z
+
+def D_3(t):
+    return Fmax*math.log(t)*t**z
+
+
+# Fonction de coût (à adapter)
+def d_i_k(k):
+    return 1
+
 
 def CLUPmax(x_it , m_T, N_ifpt, N_itr_jpt):
     train = 0
@@ -49,5 +72,18 @@ def CLUPmax(x_it , m_T, N_ifpt, N_itr_jpt):
         M_ct_ipt = [i for i in range (0,len(N_itr_jpt[t,p,])) if N_itr_jpt[t,p,i] <= D_2(t) ]
         for _ in M_ct_ipt:
             # Récupère les informations des autres // Partie qui sera plus facile à coder plus tard
-            N_itr_jpt = N_
+            N_itr_jpt[t,p,] = N_jpt - N_i_jpt[t,p,]  # Il faut imaginer autant de N_jpt que de processeurs
+        M_ut_ipt = [i for i in range (0,len(N_itr_jpt[t,p,])) if N_itr_jpt[t,p,i] <= D_2(t) ]
+        M_ue_ipt = [i for i in range (0,len(N_i_jpt[t,p,])) if N_i_jpt[t,p,] <= D_3(t) ]
+        if len(M_ut_ipt)>0:
+            a_i = random.choice(M_ut_ipt)  # /!\ Attention, les a_i représentent les choix de i : il va falloir
+                                           # gérer le fait qu'ils peuvent être des bras ou d'autres learners...
+            train = 1
+        elif len(M_ue_ipt):
+            a_i = random.choice(M_ue_ipt)
+        else:
+            # Pour p, pour chaque choix k, reward moyen sur toute la période t
+            r_est_ikpt = numpy.append(Eps_i_fpt[p, ], Eps_i_jpt[p, ])/numpy.append(count_i_fpt[p, ], count_i_jpt[p, ])
+            # Finir : choisir a_i parmi les argmax de r_est_ikpt - d_i_k
+            a_i = random.choice
 
