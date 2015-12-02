@@ -43,13 +43,16 @@ count_i_fpt = numpy.zeros((nb_m,Fi))
 
 
 
+# D'après ces fonctions de contrôle (p.6), 
+# on détermine successivement s'il faut entrer en phase :
+  # d'exploration de ses bras persos
+  # ou d'entraînement
+  # ou de jeu
 
 def D_1(t):
     return math.log(t)*t**z
-
 def D_2(t):
     return Fmax*math.log(t)*t**z
-
 def D_3(t):
     return Fmax*math.log(t)*t**z
 
