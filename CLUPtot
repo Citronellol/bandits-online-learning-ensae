@@ -1,0 +1,162 @@
+# CLUPmax
+
+import math, random, numpy
+
+random.seed(0)
+# Nombre de learner, temps total, nombre d'hypercubes
+M = 4
+T = 100
+m_T = 2
+D = 2
+nb_m = m_T**D
+t = 1
+
+# Nombre d'arms par learner
+F = numpy.random.poisson(1, M)+1
+# Borne maximale des arms
+Fmax = max(F)
+
+# Paramètres de fonctions
+z = 0.5
+
+# Paramètres pour le bandits i
+ordi_index = 2
+Fi = F[ordi_index]  # Nombre d'arms
+
+# Informations et contexte
+x_it = numpy.zeros((T,M))
+C_it = list()
+
+# Initialisation des différents compteurs
+N_ipt = numpy.zeros((T, nb_m))       # Nombre de contextes arrivant à i à chaque t dans T et chaque espace dans m_T
+N_ifpt = numpy.zeros((T, nb_m, Fi))  # Nombre de fois où un arm f dans Fi est sélectionné pour un contexte à temps t et
+                                     # espace p
+N_itr_jpt = numpy.zeros((T, nb_m, M-1))  # Estimation par i du nombre de contextes arrivant vers j depuis tous les learners
+                                         # (except phases d'explorations et exploitations de i)
+N_i_jpt = numpy.zeros((T, nb_m, M-1))    # Nombre de contextes venant de i vers j à t pour l'espace p
+
+
+# Initialisation des fonctions de récompenses // Note : à chaque temps t ajouter le reward
+Eps_i_jpt = numpy.zeros((nb_m, M-1))  # Rewards collected by i after selecting j for space p by time t during
+                                      # exploration and exploitation time
+count_i_jpt = numpy.zeros((nb_m,M-1))  # Count the number of actions (because possibility of having many in one time t
+Eps_i_fpt = numpy.zeros((nb_m, Fi))   # Idem mais reward collected by i after using one of his arm (by itself or after
+                                      # being called by another bandit.
+count_i_fpt = numpy.zeros((nb_m,Fi))
+
+
+# D'après ces fonctions de contrôle (p.6),
+# on détermine successivement s'il faut entrer en phase :
+  # d'exploration de ses bras persos
+  # ou d'entraînement
+  # ou de jeu
+
+
+def D_1(t):
+    return math.log(t)*t**z
+
+def D_2(t):
+    return Fmax*math.log(t)*t**z
+
+def D_3(t):
+    return Fmax*math.log(t)*t**z
+
+
+# Fonction de coût (à adapter)
+def d_i_k(k):
+    return 1
+
+
+def CLUPmax(x_it_donne):
+    train = 0
+    # Partition en hypercube régulier // recherche de l'index de l'ensemble contenant le contexte
+    # Les p.it sont dans (0,m.T-1)
+    p = sum((int(x_it[i]*m_T))*m_T**i for i in range (0,m_T))
+    # N_ifpt est le vecteur du nombre d'utilisations des bras f du learner i pour l'espace p
+    F_ue_ipt = [i for i in range (0,len(N_ifpt[t,p,])) if N_ifpt[t,p,i] <= D_1(t) ]
+    if len(F_ue_ipt)>0:
+        a_i = random.choice(F_ue_ipt)
+        choix = "arm"
+    else:
+        M_ct_ipt = [i for i in range (0,len(N_itr_jpt[t,p,])) if N_itr_jpt[t,p,i] <= D_2(t) ]
+        for _ in M_ct_ipt:
+            # Récupère les informations des autres // Partie qui sera plus facile à coder plus tard
+            N_itr_jpt[t,p,] = N_jpt - N_i_jpt[t,p,]  # Il faut imaginer autant de N_jpt que de processeurs
+        M_ut_ipt = [i for i in range (0,len(N_itr_jpt[t,p,])) if N_itr_jpt[t,p,i] <= D_2(t) ]
+        M_ue_ipt = [i for i in range (0,len(N_i_jpt[t,p,])) if N_i_jpt[t,p,i] <= D_3(t) ]
+        if len(M_ut_ipt)>0:
+            a_i = random.choice(M_ut_ipt)  # /!\ Attention, les a_i représentent les choix de i : il va falloir
+                                           # gérer le fait qu'ils peuvent être des bras ou d'autres learners...
+            choix = "learner"
+            train = 1
+        elif len(M_ue_ipt)>0:
+            a_i = random.choice(M_ue_ipt)
+            choix = "learner"
+        else:
+            # Pour p, pour chaque choix k, reward moyen sur toute la période t
+            r_est_ikpt = numpy.append(Eps_i_fpt[p, ], Eps_i_jpt[p, ])/numpy.append(count_i_fpt[p, ], count_i_jpt[p, ])
+            rd_est_ikpt = r_est_ikpt - d_i_k()  # A modifier avec la fonction de cout
+            # Finir : choisir a_i parmi les argmax de r_est_ikpt - d_i_k
+            a_i = random.choice(numpy.where(rd_est_ikpt == rd_est_ikpt.max())[0])
+            if a_i < Fi:
+                choix = "arm"
+            else:
+                choix = "learner"
+                a_i = a_i - Fi + 1
+    return {'a_i': a_i , 'choix': choix, 'train' : train, 'p':p}
+
+
+
+def CLUPcoop(x_jt):
+    p = numpy.zeros((len(C_it)))
+    b_ij = numpy.zeros((len(C_it)))
+    for j in C_it:
+        p[j] = sum((int(x_jt[i]*m_T))*m_T**i for i in range (0,m_T))   # Reference a x_jt a preciser...
+        F_ue_ipt = [i for i in range (0,len(N_ifpt[t,p[j],])) if N_ifpt[t,p[j],i] <= D_1(t) ]
+        if len(F_ue_ipt)>0:
+            b_ij[j] = random.choice(F_ue_ipt)
+        else:
+            # Pour p, pour chaque choix k, reward moyen sur toute la période t
+            r_est_ikpt = Eps_i_fpt[p[j], ]/count_i_fpt[p[j], ]
+            rd_est_ikpt = r_est_ikpt - d_i_k()  # A modifier avec la fonction de cout
+            # Finir : choisir a_i parmi les argmax de r_est_ikpt - d_i_k
+            b_ij[j] = random.choice(numpy.where(rd_est_ikpt == rd_est_ikpt.max())[0])
+    return {'b_ij':b_ij,'p':p}
+
+
+def CLUP(i):
+    t=1
+    while t<=T:
+        resultat = CLUPmax(x_it_donne=x_it[t,i])
+        if resultat['choix']== 'learner':
+            C_jt = list.append(resultat['a_i']) # C_jt à fignoler
+        if len(C_it)>0:
+            resultatcoop = CLUPcoop() # x_jt?
+        if resultat['choix']== 'arm':
+            reward = reward_arm(resultat['p'],resultat['a_i']) # reward à définir
+        else:
+            reward = reward_learner(resultat['p'],resultat['a_i'])
+        if resultat['train'] == 1:
+            N_itr_jpt[t,resultat['a_i'],resultat['p']] = N_itr_jpt[t,resultat['a_i'],resultat['p']] + 1
+        else:
+            if resultat['choix']== 'arm':
+                Eps_i_fpt[resultat['p'],resultat['a_i']] = Eps_i_fpt[resultat['p'],resultat['a_i']] + reward
+                N_ipt[t,resultat['p']] = N_ipt[t,resultat['p']]+1
+                N_ifpt[t,resultat['p'],resultat['a_i']] = N_ifpt[t,resultat['p'],resultat['a_i']] + 1
+                count_i_fpt[resultat['p'],resultat['a_i']] = count_i_fpt[resultat['p'],resultat['a_i']]+1
+            else:
+                Eps_i_jpt[resultat['p'],resultat['a_i']] = Eps_i_jpt[resultat['p'],resultat['a_i']] + reward
+                N_ipt[t,resultat['p']] = N_ipt[t,resultat['p']]+1
+                N_i_jpt[t,resultat['p'],resultat['a_i']] = N_i_jpt[t,resultat['p'],resultat['a_i']] + 1
+                count_i_jpt[resultat['p'],resultat['a_i']] = count_i_jpt[resultat['p'],resultat['a_i']]+1
+        if len(C_it)>0:
+            for j in C_it:
+                reward = reward_arm(resultatcoop['p'][j],resultatcoop['b_ij'][j])
+                Eps_i_fpt[resultatcoop['p'][j],resultatcoop['b_ij'][j]] = \
+                    Eps_i_fpt[resultatcoop['p'][j],resultatcoop['b_ij'][j]]  + reward
+                N_ipt[t,resultatcoop['p'][j]] = N_ipt[t,resultatcoop['p'][j]]+1
+                N_ifpt[t,resultatcoop['p'][j],resultatcoop['b_ij'][j]] =\
+                    N_ifpt[t,resultatcoop['p'][j],resultatcoop['b_ij'][j]] + 1
+                count_i_fpt[resultatcoop['p'][j],resultatcoop['b_ij'][j]] = \
+                    count_i_fpt[resultatcoop['p'][j],resultatcoop['b_ij'][j]] + 1
+        t = t+1
