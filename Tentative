@@ -25,7 +25,7 @@ x_it = numpy.zeros((T,M,D))
 
 for t in range(0,T):
     for m in range(0,M):
-        x_it[t,m,] = random.uniform(low=0.0, high=1.0,size=2)
+        x_it[t,m,] = numpy.random.uniform(low=0.0, high=1.0,size=2)
 
 
 
@@ -57,10 +57,16 @@ count_j = numpy.zeros((nb_m))
 
 # Information sur les rewards
 
-rewarda_i = numpy.zeros((T,nb_m))
-rewarda_j = numpy.zeros((T,nb_m))
-rewardc_i = numpy.zeros((T,nb_m))
-rewardc_j = numpy.zeros((T,nb_m))
+position = numpy.zeros((T,M))
+
+for t in range(0,T):
+    for m in range(0,M):
+        position[t,m] = sum((int(x_it[t,m,i]*m_T))*m_T**i for i in range (0,m_T))
+
+rewarda_i = numpy.zeros((T,Fi))
+rewarda_j = numpy.zeros((T,Fj))
+rewardc_i = numpy.zeros((T,Fi))
+rewardc_j = numpy.zeros((T,Fj))
 
 
 # Estimation du nombre de contexte chez le voisin
@@ -291,8 +297,17 @@ def CLUP_j(t):
                 rewardc_j[t,res_j['b_ji']] = reward
 
 
-t=0
+t=1
 while t<T:
     CLUP_i(t)
     CLUP_j(t)
     t= t+1
+
+
+
+
+
+
+
+print(x_it)
+print(rewarda_i)
