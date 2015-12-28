@@ -3,7 +3,7 @@ import math, random, numpy
 random.seed(0)
 # Nombre de learner, temps total, nombre d'hypercubes
 M = 2
-T = 100
+T = 1000
 m_T = 2
 D = 2
 nb_m = m_T**D
@@ -117,11 +117,18 @@ def reward_j(p,k): # p = espace / k = choix
 
 def CLUPmax_i(t):
     train = 0
+    # train = indicatrice d'envoi de l'instance à un processeur
+    # variable à supprimer ?
+    # "altruisme" d'envoi d'une instance
+    
     # Partition en hypercube régulier // recherche de l'index de l'ensemble contenant le contexte
     # Les p.it sont dans (0,m.T-1)
     p = sum((int(x_it[t,0,i]*m_T))*m_T**i for i in range (0,m_T))
     # N_ifpt est le vecteur du nombre d'utilisations des bras f du learner i pour l'espace p
+    
+    # ensemble des bras sous-entraînés
     F_ue_ipt = [i for i in range (0,len(count_i_fpt[p,])) if count_i_fpt[p,i] <= D_1(t) ]
+    
     if len(F_ue_ipt)>0:
         a_i = random.choice(F_ue_ipt)
         choix = "arm"
@@ -170,6 +177,8 @@ def CLUPcoop_i(t):
             b_ij[j] = random.choice(numpy.where(rd_est_ikpt == rd_est_ikpt.max())[0])
     return {'b_ij':b_ij,'p':p}
 
+# on a supprimé les vecteurs N_ij etc
+# Ici, on réactualise les récompenses : total des récompenses et nombre 
 
 def CLUP_i(t):
         res_i = CLUPmax_i(t)
@@ -181,12 +190,20 @@ def CLUP_i(t):
             reward = reward_i(res_i['p'],res_i['a_i']+1) # reward à définir
         else:
             reward = reward_j(res_i['p'],CLUPcoop_j(t)['b_ji']+1)
+            # ici, il faudra peut-être remplacer par la fonction de communication entre les processeurs
         if res_i['train'] == 1:
             N_itr_jpt[res_i['p'],res_i['a_i']] = N_itr_jpt[res_i['p'],res_i['a_i']] + 1
         else:
             if res_i['choix']== 'arm':
+                # Eps_i_fpt = ensemble des rewards pour le bras p.
+                # subscript i ou j : l'autre processeur
+                
                 Eps_i_fpt[res_i['p'],res_i['a_i']] = Eps_i_fpt[res_i['p'],res_i['a_i']] + reward
+                
+                # compte du nombre d'activations du processeur i, pour le contexte
                 count_i[res_i['p']] = count_i[res_i['p']]+1
+                
+                # compte du nombre d'activations du bras pour, pour le contexte
                 count_i_fpt[res_i['p'],res_i['a_i']] = count_i_fpt[res_i['p'],res_i['a_i']]+1
 
                 rewarda_i[t,res_i['a_i']] = reward
@@ -272,7 +289,7 @@ def CLUP_j(t):
             resc_j = CLUPcoop_j(t) # x_jt?
         if res_j['choix']== 'arm':
             reward = reward_j(res_j['p'],res_j['a_j']+1) # reward à définir
-            rewarda_j[t,res_j['a_j']] = reward
+            rewarda_j[t,res_j['a_j']] = reward      # dit quelle reward a obtenu quel bras à quel temps 
         else:
             reward = reward_i(res_j['p'],CLUPcoop_i(t)['b_ij']+1)
         if res_j['train'] == 1:
