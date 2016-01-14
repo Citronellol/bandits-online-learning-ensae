@@ -26,6 +26,7 @@ class Learner(multiprocessing.Process):
         self.rewardCoop = rewardCoop
         self.count_j = count_j
         self.C_it = C_it
+        self.t = 1
 
 
     def reward(self, p, choix): # p = espace / id = identifiant du learner (1 ou 2) / choix = choix de l'arm
@@ -43,7 +44,7 @@ class Learner(multiprocessing.Process):
     # Tache à accomplir : à chaque fois récupérer une tâche dans la queue et effectuer le travail. Si la tâche est
     # None alors cesser de travailler (sortie du loop).
 
-    def CLUPmax_i(self, x_it):
+    def CLUPmax_i(self, x_it, t):
         train = 0
         m_T = len(x_it)
         # Partition en hypercube régulier // recherche de l'index de l'ensemble contenant le contexte
@@ -58,7 +59,9 @@ class Learner(multiprocessing.Process):
             M_ct_ipt = [i for i in self.others if self.N_itr_jpt[i][p] <= D_2(t)]
             for j in M_ct_ipt:
                 # Récupère les informations des autres //
-                self.N_itr_jpt[j][p] = count_j['%s %s' % (p, j)] - self.count_i_jpt[j][p]
+                count = self.count_j[j].get()
+                self.N_itr_jpt[j][p] = count[p] - self.count_i_jpt[j][p]
+                # self.count_j[j].task_done()
             M_ut_ipt = [i for i in self.others if self.N_itr_jpt[i][p] <= D_2(t)]
             M_ue_ipt = [i for i in self.others if self.count_i_jpt[i][p] <= D_3(t)]
             if len(M_ut_ipt) > 0:
@@ -87,7 +90,7 @@ class Learner(multiprocessing.Process):
         return {'a_i': a_i, 'choix': choix, 'train': train, 'p': p}
 
 
-    def CLUPcoop_i(self, p):
+    def CLUPcoop_i(self, p, t):
         F_ue_ipt = [i for i in range (0,len(self.count_i_fpt[p,])) if self.count_i_fpt[p,i] <= D_1(t)]
         if len(F_ue_ipt) > 0:
             b_ij = random.choice(F_ue_ipt)
@@ -103,7 +106,6 @@ class Learner(multiprocessing.Process):
         while True:
             # Prendre la nouvelle tâche personnelle
             next_task = self.task_queue.get()
-
             # Si None, s'arrêter
             if next_task is None:
                 # Poison pill terminant le processus
@@ -113,28 +115,36 @@ class Learner(multiprocessing.Process):
                 break
 
             # Sinon appliquer CLUPmax
-            decision = self.CLUPmax_i(next_task)
+            decision = self.CLUPmax_i(next_task, self.t)
+
+            p = sum((int(next_task[i]*m_T))*m_T**i for i in range(0, m_T))
+            # N_ifpt est le vecteur du nombre d'utilisations des bras f du learner i pour l'espace p
+            F_ue_ipt = [i for i in range(0, len(self.count_i_fpt[p,])) if self.count_i_fpt[p,i] <= D_1(self.t)]
+
+            print(F_ue_ipt, self.id, self.t, decision['choix'], decision['train'])
 
             # Si la décision est d'appeler un learner, on ajoute l'information à la liste de tâches externes à
             # faire pour ce dernier et on précise d'où elle vient
             if decision['choix'] == "learner":
-                C_it[decision['a_i']].append([decision['p'],self.id])
+                self.C_it[decision['a_i']].put([decision['p'],self.id])
 
             # Si le learner self découvre des tâches externes à effectuer, il les fait
-            if len(C_it[self.id]) > 0:
+            # print('C_it empty: ', self.C_it[self.id].empty())
+            while self.C_it[self.id].empty() is not True:
                 # Récupère les tâches et les efface de la liste (possible problème de synchro - ajout pendant
                 # la suppression ?)
-                taches_ext = C_it[self.id]
-                C_it[self.id] = list()
+                taches_ext = self.C_it[self.id].get()
+                print(taches_ext, self.id)
+                # print('taches:', taches_ext, self.id)
                 # Pour chaque tâche, effectuer CLUPcoop. On stocke alors les résultats en spécifiant les identifiants
                 # ainsi que le contexte et le reward dans la liste partagée rewardCoop
-                for item in taches_ext:
-                    decision_ext = self.CLUPcoop_i(item[1])
-                    reward_ext = self.reward(decision_ext['p'], decision_ext['b_ij'])
-                    rewardCoop[item[0]].append([decision_ext['p'], reward_ext, self.id])
-                    self.Eps_i_fpt[decision_ext['p'], decision_ext['b_ij']] += reward_ext
-                    self.count_i[decision_ext['p']] += 1
-                    self.count_i_fpt[decision_ext['p'], decision_ext['b_ij']] += 1
+                decision_ext = self.CLUPcoop_i(taches_ext[0], self.t)
+                reward_ext = self.reward(decision_ext['p'], decision_ext['b_ij'])
+                self.rewardCoop[taches_ext[1]].put([decision_ext['p'], reward_ext, self.id])
+                self.Eps_i_fpt[decision_ext['p'], decision_ext['b_ij']] += reward_ext
+                self.count_i[decision_ext['p']] += 1
+                self.count_i_fpt[decision_ext['p'], decision_ext['b_ij']] += 1
+                # self.C_it[self.id].task_done()
 
             # Maintenant : pour les choix 'arm' récupérer la récompenses. Pour les choix effectués à l'extérieur,
             # récupérer les diverses récompenses.
@@ -143,10 +153,11 @@ class Learner(multiprocessing.Process):
             resultats = []
             if decision['choix'] == 'arm':
                 reward = self.reward(decision['p'],decision['a_i'])
-            else:
-                if len(rewardCoop[self.id]) > 0:
-                    resultats = rewardCoop[self.id]
-                    rewardCoop[self.id] = list()
+                # print(reward)
+
+            while rewardCoop[self.id].empty() is not True:
+                resultats.append(self.rewardCoop[self.id].get())
+                # rewardCoop[self.id].task_done()
 
             # Noter que la façon de spécifier les choses n'est peut-être pas optimale ici...
             if decision['train'] == 1:
@@ -157,26 +168,18 @@ class Learner(multiprocessing.Process):
                     self.count_i[decision['p']] += 1
                     self.count_i_fpt[decision['p'],decision['a_i']] += 1
 
-                else:
-                    for r in resultats:
-                        self.Eps_i_jpt[r[2]][r[0]] += r[1]
-                        self.count_i[r[0]] += 1
-                        self.count_i_jpt[r[2]][r[0]] += 1
+            if len(resultats) > 0:
+                for r in resultats:
+                    self.Eps_i_jpt[r[2]][r[0]] += r[1]
+                    self.count_i[r[0]] += 1
+                    self.count_i_jpt[r[2]][r[0]] += 1
 
             # Actualisation des divers résultats
-            for p in range(nb_m):
-                count_j['%s %s' % (p, self.id)] = self.count_i[p]
+            self.t += 1
+            self.count_j[self.id].put(self.count_i)
             self.task_queue.task_done()
         return
 
-
-
-
-# D'après ces fonctions de contrôle (p.6),
-# on détermine successivement s'il faut entrer en phase :
-  # d'exploration de ses bras persos
-  # ou d'entraînement
-  # ou de jeu
 
 z = 0.5
 
@@ -200,27 +203,21 @@ if __name__ == '__main__':
 
     # Nombre de learner, temps total, nombre d'hypercubes
     M = 2
-    T = 1000000
+    T = 10000
     m_T = 2
     D = 2
     nb_m = m_T**D
 
     # Création d'éléments partagés par tous que l'on va pouvoir updater
-    mgr = multiprocessing.Manager()
-    count_j = mgr.dict()
+    count_j = [multiprocessing.Queue() for i in range(M)]
 
     # Mention spéciale : ces deux éléments vont nous permettre de stocker les demandes transversales de tâches ainsi que
     # les récompenses qui en découlent
-    C_it = mgr.dict()
-    for i in range(M):
-        C_it[i] = list()
-    rewardCoop = mgr.dict()
-    for i in range(M):
-        rewardCoop[i] = list()
+    C_it = [multiprocessing.Queue() for i in range(M)]
+    rewardCoop = [multiprocessing.Queue() for i in range(M)]
 
     # Construction d'une Queue
     tasks = multiprocessing.JoinableQueue()
-    results = multiprocessing.Queue()
 
 
     # Construction des informations
@@ -251,5 +248,5 @@ if __name__ == '__main__':
     for i in range(M):
         tasks.put(None)
 
-    # Attente que chacun a fini (utile pour printer les résultats à la fin)
+    # Attente que chacun ait fini (utile pour printer les résultats à la fin)
     tasks.join()
