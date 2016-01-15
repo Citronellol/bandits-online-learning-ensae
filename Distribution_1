@@ -73,11 +73,11 @@ class Learner(multiprocessing.Process):
                 choix = "learner"
             else:
                 # Pour p, pour chaque choix k, reward moyen sur toute la période t
-                r_est_ikpt = numpy.zeros((nb_m, self.Fi + M-1))
-                r_est_ikpt[p,0:self.Fi] = numpy.append(self.Eps_i_fpt[p, ])/numpy.append(self.count_i_fpt[p, ])
+                r_est_ikpt = numpy.zeros(self.Fi + M-1)
+                r_est_ikpt[0:self.Fi] = self.Eps_i_fpt[p, ]/self.count_i_fpt[p, ]
                 for i in self.others:
                     iter = 0
-                    r_est_ikpt[p,self.Fi + iter] = self.Eps_i_jpt[i][p]/self.count_i_jpt[i][p]
+                    r_est_ikpt[self.Fi + iter] = self.Eps_i_jpt[i][p]/self.count_i_jpt[i][p]
                     iter += 1
                 rd_est_ikpt = r_est_ikpt # - d_i_k()  # A modifier avec la fonction de cout : pour l'instant en attente
                 # Finir : choisir a_i parmi les argmax de r_est_ikpt - d_i_k
@@ -108,15 +108,19 @@ class Learner(multiprocessing.Process):
             next_task = self.task_queue.get()
             # Si None, s'arrêter
             if next_task is None:
+                # for i in range(M):
+                #    self.C_it[i].cancel_join_thread()
+                #    self.count_j[i].cancel_join_thread()
+                #    self.rewardCoop[i].cancel_join_thread()
                 # Poison pill terminant le processus
+
                 print("Reward de %s en activant un de ses bras :" % self.id, self.Eps_i_fpt)
                 print("Reward de %s après avoir été sollicité par un autre learner" % self.id, self.Eps_i_jpt)
                 self.task_queue.task_done()
                 break
-
+            #    print(self.count_i_jpt)
             # Sinon appliquer CLUPmax
             decision = self.CLUPmax_i(next_task, self.t)
-
             p = sum((int(next_task[i]*m_T))*m_T**i for i in range(0, m_T))
             # N_ifpt est le vecteur du nombre d'utilisations des bras f du learner i pour l'espace p
             F_ue_ipt = [i for i in range(0, len(self.count_i_fpt[p,])) if self.count_i_fpt[p,i] <= D_1(self.t)]
@@ -134,7 +138,6 @@ class Learner(multiprocessing.Process):
                 # Récupère les tâches et les efface de la liste (possible problème de synchro - ajout pendant
                 # la suppression ?)
                 taches_ext = self.C_it[self.id].get()
-                print(taches_ext, self.id)
                 # print('taches:', taches_ext, self.id)
                 # Pour chaque tâche, effectuer CLUPcoop. On stocke alors les résultats en spécifiant les identifiants
                 # ainsi que le contexte et le reward dans la liste partagée rewardCoop
@@ -145,7 +148,7 @@ class Learner(multiprocessing.Process):
                 self.count_i[decision_ext['p']] += 1
                 self.count_i_fpt[decision_ext['p'], decision_ext['b_ij']] += 1
                 # self.C_it[self.id].task_done()
-
+                # print(self.C_it[self.id])
             # Maintenant : pour les choix 'arm' récupérer la récompenses. Pour les choix effectués à l'extérieur,
             # récupérer les diverses récompenses.
             # Dans chaque cas on forme une liste de tuples (contexte, reward).
@@ -176,7 +179,8 @@ class Learner(multiprocessing.Process):
 
             # Actualisation des divers résultats
             self.t += 1
-            self.count_j[self.id].put(self.count_i)
+            if self.t%2 == 0:
+                self.count_j[self.id].put(self.count_i)
             self.task_queue.task_done()
         return
 
@@ -203,7 +207,7 @@ if __name__ == '__main__':
 
     # Nombre de learner, temps total, nombre d'hypercubes
     M = 2
-    T = 10000
+    T = 100000
     m_T = 2
     D = 2
     nb_m = m_T**D
@@ -250,3 +254,15 @@ if __name__ == '__main__':
 
     # Attente que chacun ait fini (utile pour printer les résultats à la fin)
     tasks.join()
+
+    print(learners[0].is_alive())
+    print(learners[1].is_alive())
+
+    for i in range(M):
+        while count_j[i].empty() is not True:
+            cou = count_j[i].get()
+            # print(cou)
+
+
+    print(learners[0].is_alive())
+    print(learners[1].is_alive())
