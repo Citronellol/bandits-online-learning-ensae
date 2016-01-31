@@ -1,0 +1,384 @@
+import math, random, numpy, multiprocessing
+import matplotlib.pyplot as plt
+
+random.seed(0)
+
+# Construction d'une classe de learner : avec les attributs d'intérêt. Note : il est possible d'ajouter des arguments
+# comme le nombre de bras (pour l'instant faisons simple).
+
+# Attention à la façon dont on va traiter les choses par la suite. Il faut que le process reste vivant tout au long
+# des calculs (et non pas qu'on en créé pour chaque date).
+
+class Learner(multiprocessing.Process):
+
+    def __init__(self, id, Fi, task_queue, count_j, rewardCoop, C_it):
+        multiprocessing.Process.__init__(self)
+
+        # Fait reference a la tasks des taches
+        self.task_queue = task_queue
+        # Numero d'identifiant unique
+        self.id = id
+        # Nombre de bras
+        self.Fi = Fi
+        # Identifiants des autres workers
+        self.others = [i for i in range(M)]
+        self.others.remove(self.id)
+
+        # Somme totale des rewards apres appel d'un autre worker. Dictionnaire avec les Ids en clefs et des vecteurs
+        # en objet (autant de composantes que d'espaces differents).
+        self.Eps_i_jpt = { s:numpy.zeros(nb_m) for s in self.others}
+        # Idem mais pour les compteurs.
+        self.count_i_jpt = { s:numpy.zeros(nb_m) for s in self.others}
+
+        # Idem mais pour les recompenses et compteurs lors d'un appel a un bras personnel. Matrices de dimension :
+        # nombre de sous-espaces x nombre de bras
+        self.Eps_i_fpt = numpy.zeros((nb_m, Fi))
+        self.count_i_fpt = numpy.zeros((nb_m, Fi))
+
+        # Compteur total (par sous espace)
+        self.count_i = numpy.zeros(nb_m)
+
+        # Compteur d'estimation des compteurs des autres learners
+        self.N_itr_jpt = { s:numpy.zeros(nb_m) for s in self.others}
+
+        # References aux queues initialisees dans la fonction main
+        self.rewardCoop = rewardCoop
+        self.count_j = count_j
+        self.C_it = C_it
+
+        # Initialisation du temps
+        self.t = 1
+
+        # Pour graphiques
+
+        # Evolution des rewards
+        self.graph_f1 = numpy.zeros((T))
+        self.graph_f2 = numpy.zeros((T))
+        # Appel à un ami
+        self.graph_f3 = numpy.zeros((T))
+        self.graph_f4 = numpy.zeros((T))
+
+
+    def reward(self, p, choix): # p = espace / id = identifiant du learner (1 ou 2) / choix = choix de l'arm
+        if self.id == 0:
+            if p == choix:
+                return 1
+            else:
+                return -1
+        else:
+            if p == choix+2:
+                return 1
+            else:
+                return -1
+
+    # Tache à accomplir : à chaque fois récupérer une tâche dans la queue et effectuer le travail. Si la tâche est
+    # None alors cesser de travailler (sortie du loop).
+
+    def CLUPmax_i(self, x_it, t):
+        train = 0
+        m_T = len(x_it)
+        # Partition en hypercube régulier // recherche de l'index de l'ensemble contenant le contexte
+        # Les p.it sont dans (0,nb_m-1)
+        p = sum((int(x_it[i]*m_T))*m_T**i for i in range(0, m_T))
+
+        # Ensemble des bras sous-explores
+        F_ue_ipt = [i for i in range(0, len(self.count_i_fpt[p,])) if self.count_i_fpt[p,i] <= D_1(t)]
+        # Si jamais non vide, selectionner aleaoirement un bras et indiquer la nature du choix
+        if len(F_ue_ipt) > 0:
+            a_i = random.choice(F_ue_ipt)
+            choix = "arm"
+
+        # Sinon, analyser les learners sous entraines ou sous explores
+        else:
+            #
+            M_ct_ipt = [i for i in self.others if self.N_itr_jpt[i][p] <= D_2(t)]
+            for j in M_ct_ipt:
+                # Récupère les informations des autres //
+                count = self.count_j[j][self.id].get()
+                # Actualise le compteur interne
+                self.N_itr_jpt[j][p] = count[p] - self.count_i_jpt[j][p]
+                # self.count_j[j].task_done()
+            # Learners sous entraines et sous explores
+            M_ut_ipt = [i for i in self.others if self.N_itr_jpt[i][p] <= D_2(t)]
+            M_ue_ipt = [i for i in self.others if self.count_i_jpt[i][p] <= D_3(t)]
+            # Si ensemble des sous entraines non vide alors choisir un des learners sous entraines et indiquer la
+            # nature du choix
+            if len(M_ut_ipt) > 0:
+                a_i = random.choice(M_ut_ipt)
+                choix = "learner"
+                train = 1
+            # Sinon, regarder l'ensemble des sous explores et faire de même.
+            elif len(M_ue_ipt) > 0:
+                a_i = random.choice(M_ue_ipt)
+                choix = "learner"
+            # Sinon, entrer en phase d'exploitation
+            else:
+                # Pour p, pour chaque choix k, calcul des rewards moyens sur toute la période t, stockes dans un
+                # vecteur
+                r_est_ikpt = numpy.zeros(self.Fi + M-1)
+                # On ajoute les rewards moyens pour chaque bras du learner
+                r_est_ikpt[0:self.Fi] = self.Eps_i_fpt[p, ]/self.count_i_fpt[p, ]
+                # Puis les rewards moyens pour chaque autre learner
+                for i in self.others:
+                    iter = 0
+                    r_est_ikpt[self.Fi + iter] = self.Eps_i_jpt[i][p]/self.count_i_jpt[i][p]
+                    iter += 1
+                rd_est_ikpt = r_est_ikpt
+                # Finir : choisir a_i parmi les argmax de r_est_ikpt - d_i_k
+                a_i = random.choice(numpy.where(rd_est_ikpt == rd_est_ikpt.max())[0])
+
+                # Synthese : permet d'indiquer si le traitement est local ou en externe.
+                if a_i < self.Fi:
+                    choix = "arm"
+                else:
+                    choix = "learner"
+                    a_i = self.others[a_i - self.Fi]
+        # Return
+        return {'a_i': a_i, 'choix': choix, 'train': train, 'p': p}
+
+
+    def CLUPcoop_i(self, p, t):
+        # Recherche les bras sous explores
+        F_ue_ipt = [i for i in range (0,len(self.count_i_fpt[p,])) if self.count_i_fpt[p,i] <= D_1(t)]
+        # Si ensemble non vide, choisir un de ses elements
+        if len(F_ue_ipt) > 0:
+            b_ij = random.choice(F_ue_ipt)
+        # Sinon, passer en phase exploitation
+        else:
+            # Pour p, pour chaque choix f (obligatoirement un bras), reward moyen sur toute la période t
+            r_est_ikpt = self.Eps_i_fpt[p, ]/self.count_i_fpt[p, ]
+            rd_est_ikpt = r_est_ikpt # peut etre modifiee pour inclure une fonction de cout
+            # Finir : choisir b_ij parmi les argmax de r_est_ikpt
+            b_ij = random.choice(numpy.where(rd_est_ikpt == rd_est_ikpt.max())[0])
+        return {'b_ij': b_ij, 'p': p}
+
+    def run(self):
+        while True:
+            # Prendre la nouvelle tache personnelle
+            next_task = self.task_queue.get()
+
+            # Poison pill : Si None, s'arreter
+            if next_task is None:
+
+                # for i in range(M):
+                #    self.C_it[i].cancel_join_thread()
+                #    self.count_j[i].cancel_join_thread()
+                #    self.rewardCoop[i].cancel_join_thread()
+                # Poison pill terminant le processus
+
+                # Permet d'analyser les differents comportements des learners
+                print("Reward de %s en activant un de ses bras :" % self.id, self.Eps_i_fpt)
+                print("Reward de %s après avoir sollicité un autre learner" % self.id, self.Eps_i_jpt)
+
+                if self.id == 0:
+                    plt.plot(range(T),self.graph_f1)
+                    plt.plot(range(T),self.graph_f2)
+                    plt.xlim(0, 30000)
+                    plt.show()
+
+                #if self.id == 0:
+                #    plt.plot(range(T),self.graph_f3)
+                #    plt.plot(range(T),self.graph_f4)
+                #    plt.xlim(0, 30000)
+                   plt.show()
+
+                # tasks est une Joinable Queue donc il faut indiquer que le travail est termine et sortir de la
+                # boucle
+                self.task_queue.task_done()
+                break
+
+            #    print(self.count_i_jpt)
+
+            # Sinon appliquer CLUPmax
+            decision = self.CLUPmax_i(next_task, self.t)
+
+            p = sum((int(next_task[i]*m_T))*m_T**i for i in range(0, m_T))
+            # N_ifpt est le vecteur du nombre d'utilisations des bras f du learner i pour l'espace p
+            F_ue_ipt = [i for i in range(0, len(self.count_i_fpt[p,])) if self.count_i_fpt[p,i] <= D_1(self.t)]
+            print(F_ue_ipt, self.id, self.t, decision['choix'], decision['train'])
+
+            # Si la decision est d'appeler un learner, on ajoute l'information à la liste de taches externes à
+            # faire pour ce dernier et on precise d'où elle vient
+            if decision['choix'] == "learner":
+                self.C_it[decision['a_i']].put([decision['p'],self.id])
+
+            # Si le learner self decouvre des taches externes a effectuer, il les fait
+
+            # print('C_it empty: ', self.C_it[self.id].empty())
+
+            # Tant que la queue associee n'est pas vide, on recupere les informations et les traite
+            while self.C_it[self.id].empty() is not True:
+                # Recupere les taches et les efface de la liste (possible probleme de synchro - ajout pendant
+                # la suppression ?)
+                taches_ext = self.C_it[self.id].get()
+
+                # print('taches:', taches_ext, self.id)
+
+                # Pour chaque tache, effectuer CLUPcoop et calculer le reward
+                decision_ext = self.CLUPcoop_i(taches_ext[0], self.t)
+                reward_ext = self.reward(decision_ext['p'], decision_ext['b_ij'])
+
+                # On stocke alors les resultats en specifiant les identifiants ainsi que le contexte et le
+                # reward dans la liste partagee rewardCoop
+
+                # Note : le deuxieme element de taches_ext est l'identifiant du learner a qui communiquer les resultats
+                self.rewardCoop[taches_ext[1]].put([decision_ext['p'], reward_ext, self.id])
+                # Actualisation des compteurs d'utilisation et de recompense
+                self.Eps_i_fpt[decision_ext['p'], decision_ext['b_ij']] += reward_ext
+                self.count_i[decision_ext['p']] += 1
+                self.count_i_fpt[decision_ext['p'], decision_ext['b_ij']] += 1
+
+                # self.C_it[self.id].task_done()
+                # print(self.C_it[self.id])
+
+            # Pour les choix 'arm' recuperer la recompense. Pour les choix effectues a l'exterieur,
+            # recuperer les diverses recompenses.
+            # Dans chaque cas on forme une liste de tuples (contexte, reward).
+            reward = []
+            resultats = []
+
+            # Pour le choix local
+            if decision['choix'] == 'arm':
+                reward = self.reward(decision['p'],decision['a_i'])
+
+                # print(reward)
+
+            # Pour les choix traites en externe
+            while rewardCoop[self.id].empty() is not True:
+                resultats.append(self.rewardCoop[self.id].get())
+
+                # rewardCoop[self.id].task_done()
+
+            # Actualisation des résultats et des compteurs
+
+            # Si on etait en phase d'apprentissage
+            if decision['train'] == 1:
+                self.N_itr_jpt[decision['a_i']][decision['p']] += 1
+            # Si autre type de phase
+            else:
+                if decision['choix'] == 'arm':
+                    self.Eps_i_fpt[decision['p'],decision['a_i']] += reward
+                    self.count_i[decision['p']] += 1
+                    self.count_i_fpt[decision['p'],decision['a_i']] += 1
+            # On actualise les recompenses avec les resultats communiques par les autres learners
+            if len(resultats) > 0:
+                for r in resultats:
+                    self.Eps_i_jpt[r[2]][r[0]] += r[1]
+                    self.count_i[r[0]] += 1
+                    self.count_i_jpt[r[2]][r[0]] += 1
+
+            self.graph_f1[self.t] = self.Eps_i_fpt[0,0]
+            self.graph_f2[self.t] = self.Eps_i_fpt[0,1]
+
+            if decision['choix'] == 'arm':
+                self.graph_f3[self.t] = self.graph_f3[self.t - 1] + 1
+                self.graph_f4[self.t] = self.graph_f4[self.t - 1]
+            else:
+                self.graph_f3[self.t] = self.graph_f3[self.t - 1]
+                self.graph_f4[self.t] = self.graph_f4[self.t - 1] + 1
+
+
+            # On avance d'un pas de temps
+            self.t += 1
+
+
+
+            # Specificite de notre implementation : le learner remplit tous les deux tours la queue renseignant
+            # le compteur du nombre de ses utilisations
+            for i in self.others:
+                 if self.t%2 == 0:
+                 # if self.count_j[self.id][i].empty() is not True:
+                 #    garbage = self.count_j[self.id][i].get()
+                    self.count_j[self.id][i].put(self.count_i)
+
+            # tasks est une joinable queue il faut indiquer que la tache a ete effectuee.
+            self.task_queue.task_done()
+        return
+
+
+z = 0.5
+
+Fmax = 2
+
+def D_1(t):
+    return math.log(t)*t**z
+
+def D_2(t):
+    return Fmax*math.log(t)*t**z
+
+def D_3(t):
+    return Fmax*math.log(t)*t**z
+
+
+# Fonction de coût (ici uniforme quelque soit le choix)
+def d_i_k():
+    return 1
+
+if __name__ == '__main__':
+
+    # Nombre de learner, temps total, nombre d'hypercubes
+    M = 2
+    T = 100000
+    m_T = 2
+    D = 2
+    nb_m = m_T**D
+    listlearners = [i for i in range(M)]
+
+
+    # Création d'éléments partagés par tous que l'on va pouvoir updater
+    # count_j = [multiprocessing.Queue() for i in range(M)]
+
+    count_j = {i: {j: multiprocessing.Queue() for j in listlearners[:i] + listlearners[(i+1):]} for i in range(M)}
+
+    # Mention spéciale : ces deux éléments vont nous permettre de stocker les demandes transversales de tâches ainsi que
+    # les récompenses qui en découlent
+    C_it = [multiprocessing.Queue() for i in range(M)]
+    rewardCoop = [multiprocessing.Queue() for i in range(M)]
+
+    # Construction d'une Queue
+    tasks = multiprocessing.JoinableQueue()
+
+
+    # Construction des informations
+    x_it = numpy.zeros((T, D))
+    for t in range(0,T):
+        x_it[t, ] = numpy.random.uniform(low=0.0, high=1.0, size=2)
+
+
+    # Information sur les rewards
+    position = numpy.zeros(T)
+    for t in range(0,T):
+        position[t] = sum((int(x_it[t,i]*m_T))*m_T**i for i in range(0, m_T))
+
+
+    # Construction des learners
+    learners = [Learner(i, 2, tasks, count_j, rewardCoop, C_it) for i in range(M)]
+
+
+    # Début d'activité
+    for l in learners:
+        l.start()
+
+    # Ajout des informations dans la Queue
+    for t in range(T):
+        tasks.put(x_it[t, ])
+
+    # Poison pill pour chaque learner
+    for i in range(M):
+        tasks.put(None)
+
+    # Attente que chacun ait fini (utile pour printer les résultats à la fin)
+    tasks.join()
+
+    print(learners[0].is_alive())
+    print(learners[1].is_alive())
+
+    for i in range(M):
+        for k in listlearners[:i] + listlearners[(i+1):]:
+            while count_j[i][k].empty() is not True:
+                cou = count_j[i][k].get()
+                # print(cou)
+
+
+    print(learners[0].is_alive())
+    print(learners[1].is_alive())
